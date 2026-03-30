@@ -17,42 +17,35 @@ jobs:
         id: check_valid
         run: |
           if [ ! -f tv3.m3u ]; then
-            echo "valid=false" >> $GITHUB_OUTPUT
+            echo "valid=false" >> "$GITHUB_OUTPUT"
+            echo "⚠️ No tv3.m3u found, will fetch initial source."
             exit 0
           fi
-          # 提取当前 m3u8 链接
           current_url=$(grep -E '^https?://' tv3.m3u | head -1)
           if [ -z "$current_url" ]; then
-            echo "valid=false" >> $GITHUB_OUTPUT
+            echo "valid=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          # 测试链接是否可访问
-          http_code=$(curl -s -f -r 0-1024 "$current_url" -o /dev/null -w "%{http_code}")
+          http_code=$(curl -s -f -r 0-1024 "$current_url" -o /dev/null -w "%{http_code}" || echo "000")
           if echo "$http_code" | grep -qE '200|206'; then
-            echo "valid=true" >> $GITHUB_OUTPUT
+            echo "valid=true" >> "$GITHUB_OUTPUT"
             echo "✅ TV3 source is valid: $current_url"
           else
-            echo "valid=false" >> $GITHUB_OUTPUT
+            echo "valid=false" >> "$GITHUB_OUTPUT"
             echo "⚠️ TV3 source invalid! Will fetch new one."
           fi
 
-      # 2. 只有当前源失效时，才去抓取新的 TV3 源
-      - name: Fetch new TV3 source if invalid
-        if: steps.check_valid.outputs.valid == 'false'
+      # 2. 抓取新的 TV3 源（首次运行也会执行）
+      - name: Fetch new TV3 source
         run: |
           PAGE_URL="https://malaysia-tv.net/tv3-live/"
-          # 提取页面中唯一的 m3u8 链接
-          new_url=$(curl -s "$PAGE_URL" | grep -oE 'https?://[^"]+\.m3u8' | head -1)
-          if [ -z "$new_url" ]; then
-            echo "❌ No new source found on the page!"
-            exit 1
-          fi
+          # 增加 User-Agent 模拟浏览器，避免被网站拦截
+          new_url=$(curl -s -A "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" "$PAGE_URL" | grep -oE 'https?://[^"]+\.m3u8' | head -1)
           echo "$new_url" > new_tv3.txt
           echo "✅ Found new TV3 source: $new_url"
 
       # 3. 生成新的 M3U 文件
       - name: Generate new TV3 M3U
-        if: steps.check_valid.outputs.valid == 'false'
         run: |
           echo "#EXTM3U" > tv3.m3u
           echo "#EXTINF:-1,TV3 Malaysia Live" >> tv3.m3u
@@ -61,8 +54,7 @@ jobs:
 
       # 4. 自动提交更新
       - name: Commit and push changes
-        if: steps.check_valid.outputs.valid == 'false'
         uses: stefanzweifel/git-auto-commit-action@v5
         with:
-          commit_message: "Auto fetch new TV3 live source (old source invalid)"
+          commit_message: "Auto update TV3 live source"
           file_pattern: tv3.m3u
